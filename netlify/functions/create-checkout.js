@@ -3,7 +3,7 @@
 // Supabase project URL is public; never expose a service-role key here.
 const SUPABASE_URL = 'https://mlhpaaqmyqdgymcfluts.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_2abl92PvnPvG8N5j1_M34w_d1E-FndZ';
-const SITE_URL = 'https://cptools.netlify.app';
+const SITE_URL = 'https://cptools.netlify.app'; // production fallback
 
 exports.handler = async (event) => {
   if (event.httpMethod !== 'POST') return { statusCode: 405, body: 'Method not allowed' };
@@ -30,8 +30,9 @@ exports.handler = async (event) => {
     params.set('customer_email', user.email);
     params.set('client_reference_id', user.id);
     params.set('subscription_data[metadata][supabase_user_id]', user.id);
-    params.set('success_url', SITE_URL + '/?checkout=success&session_id={CHECKOUT_SESSION_ID}');
-    params.set('cancel_url', SITE_URL + '/?checkout=cancelled');
+    const returnOrigin = process.env.DEPLOY_PRIME_URL || SITE_URL;
+    params.set('success_url', returnOrigin + '/?checkout=success&session_id={CHECKOUT_SESSION_ID}');
+    params.set('cancel_url', returnOrigin + '/?checkout=cancelled');
 
     const checkout = await fetch('https://api.stripe.com/v1/checkout/sessions', {
       method: 'POST',
@@ -41,7 +42,10 @@ exports.handler = async (event) => {
     const session = await checkout.json();
     if (!checkout.ok || !session.url) {
       console.error('Stripe checkout error', session.error?.type, session.error?.code);
-      return { statusCode: 502, body: 'Unable to start checkout. Please try again.' };
+      const code = String(session.error?.code || session.error?.type || 'unknown_error').replace(/[^a-z0-9_]/gi, '').slice(0,60);
+      const message = String(session.error?.message || '').slice(0,200);
+      console.error('Stripe checkout diagnostic', code, message);
+      return { statusCode: 502, body: 'Stripe checkout error (' + code + '): ' + message };
     }
     return {
       statusCode: 200,
